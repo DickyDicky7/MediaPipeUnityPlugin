@@ -66,6 +66,8 @@ jobs:
 
       - name: Install Host Toolchain Dependencies
         run: |
+          # Add the Ubuntu 22.04 (Jammy) main and universe repositories to fetch nuget and mono
+          sudo sh -c 'echo "deb http://azure.archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list.d/jammy.list'
           sudo apt-get update
           sudo apt-get install -y nuget
 
