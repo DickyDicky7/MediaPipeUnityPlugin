@@ -139,12 +139,12 @@ jobs:
         run: |
           # Build target argument formulation
           if [ "${{ inputs.android_arch }}" = "both (armv7 & arm64 fat AAR)" ]; then
-            # Builds both armeabi-v7a and arm64-v8a in one command
-            ARGS="--android arm64 --android_fat_apk_cpu armeabi-v7a arm64-v8a"
+            # Builds both armeabi-v7a and arm64-v8a in one command, passing the NEON compilation flag for armv7-a
+            ARGS="--android arm64 --android_fat_apk_cpu armeabi-v7a arm64-v8a --bazel_build_opts=--copt=-mfpu=neon"
           elif [ "${{ inputs.android_arch }}" = "arm64" ]; then
             ARGS="--android arm64"
           elif [ "${{ inputs.android_arch }}" = "armv7" ]; then
-            ARGS="--android armv7"
+            ARGS="--android armv7 --bazel_build_opts=--copt=-mfpu=neon"
           fi
           
           # Append configuration parameters
