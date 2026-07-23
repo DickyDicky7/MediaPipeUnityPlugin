@@ -34,9 +34,9 @@ on:
         required: false
         default: '-s'
       solutions:
-        description: 'Solutions to compile (space-separated, e.g. face_mesh hands pose, or leave empty to build all)'
+        description: 'Solutions to compile (space-separated)'
         required: false
-        default: ''
+        default: 'face_detection face_mesh hands pose holistic selfie_segmentation object_detection'
 
 jobs:
   build-android:
@@ -139,12 +139,14 @@ jobs:
         run: |
           # Build target argument formulation
           if [ "${{ inputs.android_arch }}" = "both (armv7 & arm64 fat AAR)" ]; then
-            # Builds both armeabi-v7a and arm64-v8a in one command, passing the NEON compilation flag for armv7-a
-            ARGS="--android arm64 --android_fat_apk_cpu armeabi-v7a arm64-v8a --bazel_build_opts=--copt=-mfpu=neon"
+            # Builds both armeabi-v7a and arm64-v8a in one command.
+            # We target the pffft source files via per_file_copt to disable SIMD there,
+            # which stops compiler errors on armv7 and avoids invalid flag errors on arm64.
+            ARGS="--android arm64 --android_fat_apk_cpu armeabi-v7a arm64-v8a --bazel_build_opts=--per_file_copt=external/pffft/.*\.c@-DPFFFT_SIMD_DISABLE"
           elif [ "${{ inputs.android_arch }}" = "arm64" ]; then
             ARGS="--android arm64"
           elif [ "${{ inputs.android_arch }}" = "armv7" ]; then
-            ARGS="--android armv7 --bazel_build_opts=--copt=-mfpu=neon"
+            ARGS="--android armv7 --bazel_build_opts=--per_file_copt=external/pffft/.*\.c@-DPFFFT_SIMD_DISABLE"
           fi
           
           # Append configuration parameters
