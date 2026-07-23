@@ -64,12 +64,21 @@ jobs:
           distribution: 'zulu'
           java-version: '17'
 
-      - name: Install Host Toolchain Dependencies
+      - name: Install Host Toolchain Dependencies (Mono & Latest NuGet)
         run: |
-          # Add the Ubuntu 22.04 (Jammy) main and universe repositories to fetch nuget and mono
-          sudo sh -c 'echo "deb http://azure.archive.ubuntu.com/ubuntu jammy main universe" > /etc/apt/sources.list.d/jammy.list'
           sudo apt-get update
-          sudo apt-get install -y nuget
+          sudo apt-get install -y mono-devel ca-certificates-mono
+          
+          # Download official nuget.exe which supports SemVer 2.0.0
+          sudo curl -Lo /usr/local/bin/nuget.exe https://dist.nuget.org/win-x86-commandline/latest/nuget.exe
+          
+          # Write the wrapper script to run the exe with Mono
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/nuget
+          echo 'mono /usr/local/bin/nuget.exe "$@"' | sudo tee -a /usr/local/bin/nuget
+          sudo chmod +x /usr/local/bin/nuget
+          
+          # Verify that the new NuGet version is accessible
+          nuget | head -n 1
 
       - name: Install Android NDK
         run: |
