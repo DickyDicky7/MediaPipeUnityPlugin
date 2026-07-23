@@ -1,0 +1,170 @@
+name: Build Android Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      android_arch:
+        description: 'Android Target Architecture'
+        required: true
+        default: 'both (armv7 & arm64 fat AAR)'
+        type: choice
+        options:
+          - both (armv7 & arm64 fat AAR)
+          - arm64
+          - armv7
+      ndk_api_level:
+        description: 'Android NDK API Level'
+        required: true
+        default: '21'
+      ndk_version:
+        description: 'Android NDK Version to Install'
+        required: true
+        default: '28.2.13676358'
+      compilation_mode:
+        description: 'Compilation Mode (opt, dbg, fastbuild)'
+        required: true
+        default: 'opt'
+        type: choice
+        options:
+          - opt
+          - dbg
+          - fastbuild
+      linkopts:
+        description: 'Linker Options (e.g. -s to omit symbols and reduce size)'
+        required: false
+        default: '-s'
+      solutions:
+        description: 'Solutions to compile (space-separated, e.g. face_mesh hands pose, or leave empty to build all)'
+        required: false
+        default: ''
+
+jobs:
+  build-android:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive' # MediaPipe requires its submodules to compile correctly
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy six
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Install Host Toolchain Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nuget
+
+      - name: Install Android NDK
+        run: |
+          echo "Installing NDK version ${{ inputs.ndk_version }}..."
+          
+          # Find the correct preinstalled sdkmanager path in the GitHub runner
+          if [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          elif [ -f "$ANDROID_HOME/tools/bin/sdkmanager" ]; then
+            SDKMANAGER="$ANDROID_HOME/tools/bin/sdkmanager"
+          else
+            SDKMANAGER="sdkmanager"
+          fi
+          
+          # Accept SDK licenses
+          yes | $SDKMANAGER --licenses || true
+          
+          # Install selected NDK version
+          if ! $SDKMANAGER --install "ndk;${{ inputs.ndk_version }}"; then
+            echo "Failed to install NDK ${{ inputs.ndk_version }} via sdkmanager."
+            echo "Checking for pre-installed NDK versions..."
+            if [ -d "$ANDROID_HOME/ndk" ]; then
+              PREINSTALLED_NDK=$(ls -1 "$ANDROID_HOME/ndk" | head -n 1)
+              if [ ! -z "$PREINSTALLED_NDK" ]; then
+                echo "Found pre-installed NDK version: $PREINSTALLED_NDK"
+                NDK_PATH="$ANDROID_HOME/ndk/$PREINSTALLED_NDK"
+              else
+                echo "No pre-installed NDK found. Build may fail."
+                exit 1
+              fi
+            else
+              echo "NDK directory not found. Build may fail."
+              exit 1
+            fi
+          else
+            NDK_PATH="$ANDROID_HOME/ndk/${{ inputs.ndk_version }}"
+          fi
+          
+          # Save to GITHUB_ENV for subsequent steps
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "NDK path set to: $NDK_PATH"
+
+      - name: Install Bazelisk
+        run: |
+          sudo curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+          sudo chmod +x /usr/local/bin/bazel
+          bazel --version
+
+      - name: Cache Bazel Build Outputs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: ${{ runner.os }}-bazel-${{ inputs.android_arch }}-${{ hashFiles('**/WORKSPACE', '**/BUILD', '**/*.bzl') }}
+          restore-keys: |
+            ${{ runner.os }}-bazel-${{ inputs.android_arch }}-
+
+      - name: Build Android Native Libraries
+        run: |
+          # Build target argument formulation
+          if [ "${{ inputs.android_arch }}" = "both (armv7 & arm64 fat AAR)" ]; then
+            # Builds both armeabi-v7a and arm64-v8a in one command
+            ARGS="--android arm64 --android_fat_apk_cpu armeabi-v7a arm64-v8a"
+          elif [ "${{ inputs.android_arch }}" = "arm64" ]; then
+            ARGS="--android arm64"
+          elif [ "${{ inputs.android_arch }}" = "armv7" ]; then
+            ARGS="--android armv7"
+          fi
+          
+          # Append configuration parameters
+          ARGS="$ARGS --android_ndk_api_level ${{ inputs.ndk_api_level }} -c ${{ inputs.compilation_mode }}"
+          
+          if [ ! -z "${{ inputs.linkopts }}" ]; then
+            ARGS="$ARGS --linkopt=${{ inputs.linkopts }}"
+          fi
+          
+          if [ ! -z "${{ inputs.solutions }}" ]; then
+            ARGS="$ARGS --solutions ${{ inputs.solutions }}"
+          fi
+          
+          echo "Executing: python build.py build $ARGS -vv"
+          python build.py build $ARGS -vv
+
+      - name: Get Architecture Name for Artifact Label
+        id: get-arch-name
+        run: |
+          if [ "${{ inputs.android_arch }}" = "both (armv7 & arm64 fat AAR)" ]; then
+            echo "arch=fat-armv7-arm64" >> $GITHUB_OUTPUT
+          else
+            echo "arch=${{ inputs.android_arch }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload Built Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mediapipe-unity-android-${{ steps.get-arch-name.outputs.arch }}
+          path: |
+            Packages/com.github.homuler.mediapipe/Runtime/Plugins/Android/mediapipe_android.aar
+            Packages/com.github.homuler.mediapipe/Runtime/Resources/**/*
+            Assets/StreamingAssets/**/*
+          if-no-files-found: warn
