@@ -124,7 +124,13 @@ http_archive(
     ],
     sha256 = "b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30",
     strip_prefix = "zlib-1.2.13",
-    url = "http://zlib.net/fossils/zlib-1.2.13.tar.gz",
+    # NOTE: zlib.net/fossils is unreliable and sometimes serves a file whose checksum
+    # no longer matches, breaking the build. List stable mirrors (same sha256) first.
+    urls = [
+        "https://storage.googleapis.com/mirror.tensorflow.org/zlib.net/zlib-1.2.13.tar.gz",
+        "https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz",
+        "http://zlib.net/fossils/zlib-1.2.13.tar.gz",
+    ],
 )
 
 # gflags needed by glog
