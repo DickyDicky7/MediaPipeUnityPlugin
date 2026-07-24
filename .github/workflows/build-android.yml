@@ -29,6 +29,22 @@ on:
           - opt
           - dbg
           - fastbuild
+      optimization_level:
+        description: 'How to optimize the native .so payload in the AAR'
+        required: true
+        default: 'smallest (size: -Oz + section GC + hidden symbols)'
+        type: choice
+        options:
+          # smallest: optimize for size. Adds -Oz on top of the "balanced" flags.
+          #           May cost a few % inference speed.
+          - 'smallest (size: -Oz + section GC + hidden symbols)'
+          # balanced: keep -O2 speed but shrink the binary at no runtime cost.
+          #           -ffunction-sections/-fdata-sections make the existing
+          #           --gc-sections (see .bazelrc) actually able to drop unused code,
+          #           and hidden visibility trims the dynamic symbol table.
+          - 'balanced (speed: section GC + hidden symbols)'
+          # max_speed: legacy behaviour. No extra size flags; largest binary.
+          - 'max_speed (no extra size flags)'
       linkopts:
         description: 'Linker Options (e.g. -s to omit symbols and reduce size)'
         required: false
@@ -161,7 +177,29 @@ jobs:
           
           # Append configuration parameters
           ARGS="$ARGS --android_ndk_api_level ${{ inputs.ndk_api_level }} -c ${{ inputs.compilation_mode }}"
-          
+
+          # Size/speed optimization flags.
+          # .bazelrc already enables `--linkopt=-Wl,--gc-sections`, but section GC can only
+          # drop code if the compiler emitted per-function/per-data sections; otherwise the
+          # whole translation unit lives in one section and nothing is collected. So the
+          # -ffunction-sections/-fdata-sections copts are what actually make gc-sections pay off.
+          # Hidden visibility trims the exported dynamic symbol table (JNIEXPORT symbols keep
+          # default visibility, so JNI entry points are unaffected).
+          case "${{ inputs.optimization_level }}" in
+            smallest*)
+              OPT_COPTS="-ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden -Oz"
+              ;;
+            balanced*)
+              OPT_COPTS="-ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden"
+              ;;
+            *)
+              OPT_COPTS=""
+              ;;
+          esac
+          for copt in $OPT_COPTS; do
+            ARGS="$ARGS --bazel_build_opts=--copt=$copt"
+          done
+
           if [ ! -z "${{ inputs.linkopts }}" ]; then
             ARGS="$ARGS --linkopt=${{ inputs.linkopts }}"
           fi
